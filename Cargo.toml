@@ -1,0 +1,10 @@
+[package]
+name = "dumb_cgi"
+description = "An adequate CGI library for server-side CGI programs"
+version = "0.1.0"
+repository = "https://github.com/d2718/dumb-cgi"
+license = "MIT"
+edition = "2021"
+
+[dependencies]
+lua-patterns = "^0.4"

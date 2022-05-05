@@ -1,0 +1,28 @@
+body {
+  font-family: serif;
+  padding: 2em 1em;
+}
+
+form {
+  display: inline-grid;
+  grid-template-columns: auto, auto;
+  grid-template-rows: auto;
+}
+form > * { margin: 1ex; }
+form > *:nth-child(odd) {
+  justify-self: end;
+  grid-column: 1 / span 1;
+}
+form > *:nth-child(even) {
+  justify-self: start;
+  grid-column: 2 / span 2;
+}
+form button {
+  min-width: 8ex;
+  min-height: 1em;
+}
+
+div#output {
+  font-family: monospace;
+  white-space: pre;
+}
