@@ -3,6 +3,7 @@ CGI program for testing this library.
 */
 use std::fmt::Write;
 
+use simplelog::{WriteLogger, LevelFilter, Config};
 use dumb_cgi::{Body, Cgi};
 
 #[derive(Debug)]
@@ -50,6 +51,12 @@ fn wrapped_main() -> Result<String, ErrorShim> {
 }
 
 fn main() {
+    // WriteLogger::init(
+    //     LevelFilter::max(),
+    //     Config::default(),
+    //     std::fs::OpenOptions::new().write(true)
+    //         .open("/home/dan/testor.log").unwrap()
+    // ).unwrap();
     match wrapped_main() {
         Err(e) => {
             let estr = format!("{:?}", &e);
