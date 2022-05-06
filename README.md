@@ -20,5 +20,4 @@ simplicity and ease of use. Some trade-offs it makes are:
 
 ## To Do
 
-I still need to implement the sligtly rat's-nesty multipart/formdata parsing.
-Currently the call to `Cgi::body()` will not ever return `Body::Multipart`.
+More stress testing.
