@@ -3,9 +3,12 @@ CGI program for testing this library.
 */
 use std::fmt::Write;
 
+const FULL_BODY_LIMIT: usize = 64;
+const BODY_PREV: usize = 8;
+
 #[cfg(feature = "log")]
 use simplelog::{WriteLogger, LevelFilter, Config};
-use dumb_cgi::{Body, Cgi};
+use dumb_cgi::{Body, Request};
 
 #[derive(Debug)]
 struct ErrorShim(String);
@@ -17,7 +20,7 @@ where D: std::fmt::Display,
 }
 
 fn wrapped_main() -> Result<String, ErrorShim> {
-    let cgi = match Cgi::new() {
+    let cgi = match Request::new() {
         Ok(cgi) => cgi,
         Err(e) => {
             let estr = format!("Unable to parse environment: {:?}", e);
@@ -40,11 +43,30 @@ fn wrapped_main() -> Result<String, ErrorShim> {
     match cgi.body() {
         Body::None => write!(&mut r, "No body.\n"),
         Body::Some(b) => write!(&mut r, "{} bytes of body.\n", b.len()),
-        Body::Multipart(v) => write!(
-            &mut r,
-            "Multipart body with {} parts.\n",
-            v.len()
-        ),
+        Body::Multipart(v) => {
+            write!(
+                &mut r,
+                "Multipart body with {} parts.\n",
+                v.len()
+            )?;
+            for (n, p) in v.iter().enumerate() {
+                write!(&mut r, "\n  Part {}:\n", &n)?;
+                for (k, v) in p.headers.iter() {
+                    write!(&mut r, "    {}: {}\n", k, v)?;
+                }
+                write!(&mut r, "    {} bytes of body.\n", p.body.len())?;
+                if p.body.len() > FULL_BODY_LIMIT {
+                    let head = String::from_utf8_lossy(&(p.body)[..BODY_PREV]);
+                    let tail = String::from_utf8_lossy(&(p.body)[(p.body.len()-BODY_PREV)..]);
+                    write!(&mut r, "->|{} ... {}|<-\n", &head, &tail)?;
+                } else {
+                    let prev = String::from_utf8_lossy(&p.body);
+                    write!(&mut r, "->|{}|<-\n", &prev)?;
+                }
+                
+            }
+            write!(&mut r, "\n")
+        },
         Body::Err(e) => write!(&mut r, "Body: {:?}\n", &e),
     }?;
     

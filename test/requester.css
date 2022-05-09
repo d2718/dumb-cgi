@@ -3,6 +3,8 @@ body {
   padding: 2em 1em;
 }
 
+p#id, p#status { font-family: monospace; }
+
 form {
   display: inline-grid;
   grid-template-columns: auto, auto;

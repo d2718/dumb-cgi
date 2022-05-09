@@ -9,7 +9,29 @@ use lua_patterns::LuaPattern;
 const MULTIPART_CONTENT_TYPE: &str = "multipart/form-data";
 const MULTIPART_BOUNDARY: &str = "boundary=";
 const HTTP_NEWLINE: &str = "\r?\n";
-const MULTIPART_HEADER: &str = "^%s*([^:]-)%s*:%s*(.-)\r?\n";
+const IMMEDIATE_NEWLINE: &str = "^\r?\n";
+const MULTIPART_HEADER: &str = "([^:]-)%:(.-)\r?\n";
+
+/*
+Return the offset of the beginning of `needle` in `haystack` (or `None`
+if it's not there).
+
+This is essentially analagous to the
+[`str.find()`](https://doc.rust-lang.org/std/primitive.str.html#method.find)
+method with another `str` as the argument, and really should be a standard
+`slice` method.
+*/
+fn slicey_find<T: Eq>(haystack: &[T], needle: &[T]) -> Option<usize> {
+    // slice::windows() panics if asked for windows of length 0,
+    // so let's just return early and avoid that situation.
+    if needle.len() == 0 { return None; }
+    
+    for (n, w) in haystack.windows(needle.len()).enumerate() {
+        if w == needle { return Some(n) }
+    }
+    
+    None
+}
 
 #[derive(Debug)]
 pub enum Error {
@@ -19,6 +41,11 @@ pub enum Error {
 
 /**
 Struct holding a single part of a multipart/formdata body.
+
+Like the request headers themselves, each part's headers have been lossily
+converted to UTF-8. Names have been lower-cased and stripped of surrounding
+whitespace. Values have had their _leading_ whitespace stripped, but any
+trailing whitespace has been left intact.
 */
 #[derive(Debug)]
 pub struct MultipartPart {
@@ -39,7 +66,7 @@ Struct holding details about your CGI environment and the request
 that has been made to your program.
 */
 #[derive(Debug)]
-pub struct Cgi {
+pub struct Request {
     vars: HashMap<String, String>,
     headers: HashMap<String, String>,
     body: Body,
@@ -63,29 +90,33 @@ impl<'a> Iterator for Vars<'a> {
 }
 
 /*
-Takes a reference to the boundary string that follows the
-`; boundary=...` in the `content-type` header for formdata/multi-part
-and returns a string for building a `LuaPattern` that will match
-the boundary in the request body.
-*/
-fn patternize_string(boundary: &str) -> String {
-    let mut s = String::with_capacity(boundary.len() * 2);
+Return the index of the next newline (after `current_position`) in `bytes`
+that is immediately followed by `boundary`. This should be the first byte
+after the end of the multipart/form-data body chunk that begins on or
+after `current_position`.
 
-    // Add the extra two hyphens at the beginning.
-    s.push('%'); s.push('-');
-    s.push('%'); s.push('-');
-    
-    for c in boundary.chars() {
-        match c {
-            '-' | '(' | ')' | '.' | '%' | '+' | '*' | '[' | '^' | '$' => {
-                s.push('%');
-            },
-            _ => { /* don't do anything */ },
+`nl_patt` is a mutable reference to a `LuaPattern` built from "\r?\n",
+which should match both strictly conforming HTTP metadata newlines
+and also just regular Unicious newlines.
+*/
+fn find_next_multipart_chunk_end(
+    bytes: &[u8],
+    current_position: usize,
+    boundary: &[u8],
+    nl_patt: &mut LuaPattern
+) -> Option<usize> {
+    let mut pos = current_position;
+    let mut subslice = &bytes[pos..];
+    while nl_patt.matches_bytes(subslice) {
+        let range = nl_patt.range();
+        subslice = &bytes[(pos + range.end)..];
+        if subslice.starts_with(boundary) {
+            return Some(pos + range.start);
+        } else {
+            pos = pos + range.end;
         }
-        s.push(c);
     }
-    
-    s
+    None
 }
 
 /*
@@ -102,11 +133,18 @@ fn read_multipart_chunk(chunk: &[u8]) -> Result<MultipartPart, String> {
         let v_range = patt.capture(2);
         let (ks, ke) = (position + k_range.start, position + k_range.end);
         let (vs, ve) = (position + v_range.start, position + v_range.end);
-        let k = String::from_utf8_lossy(&chunk[ks..ke]).to_string();
-        let v = String::from_utf8_lossy(&chunk[vs..ve]).to_string();
+        let k = String::from_utf8_lossy(&chunk[ks..ke]).trim().to_string();
+        let v = String::from_utf8_lossy(&chunk[vs..ve])
+                .trim_start().to_string();
         
         headers.insert(k, v);
         position = position + patt.range().end;
+    }
+    let post_header = &chunk[position..];
+    if post_header.starts_with(b"\r\n") {
+        position += 2;
+    } else {
+        position += 1;
     }
     
     let body: Vec<u8> = chunk[position..].to_vec();
@@ -117,6 +155,10 @@ fn read_multipart_chunk(chunk: &[u8]) -> Result<MultipartPart, String> {
 /*
 Takes a reference to the body of a multipart/form-data request and
 attempts to return a `Body::Multipart` variant.
+
+This function (and the multipart body chunking code in particular) is
+kind of a rats' nest of conditionals, so this function's interior
+commentary errs on the side of excessiveness.
 */
 fn read_multipart_body(
     body_bytes: &[u8],
@@ -126,63 +168,118 @@ fn read_multipart_body(
     log::debug!("  {} body bytes", body_bytes.len());
     
     let mut parts: Vec<MultipartPart> = Vec::new();
-    let mut patt_string = patternize_string(boundary);
-    log::debug!("  pattern string is \"{}\"", &patt_string);
-    let mut boundary = LuaPattern::new(&patt_string);
+    
+    // As per RFC 7578, the `boundary=...` value found in the `CONTENT_TYPE`
+    // header will appear in the body with two hyphens prepended, so
+    // `boundary_bytes` is prepared thus from the supplied header value.
+    let prepended_boundary = {
+        let mut b = String::with_capacity(boundary.len() + 2);
+        b.push_str("--");
+        b.push_str(boundary);
+        b
+    };
+    let boundary_bytes = &prepended_boundary.as_bytes();
+    
+    // The newline pattern will match either `LF` or `CRLF`, which makes this
+    // more of a pain, but which also supports slightly non-conforming request
+    // bodies. It is morally acceptable to support requests which fail to
+    // conform in this particular way, because the whole "\r\n" thing is
+    // obnoxious.
     let mut newline = LuaPattern::new(HTTP_NEWLINE);
     
     let mut chunks: Vec<&[u8]> = Vec::new();
     
-    // Set the start of the first chunk after the first appearance
-    // of the boundary sequence.
-    let mut position = if boundary.matches_bytes(body_bytes) {
-        let pos = boundary.range().end;
-        if newline.matches_bytes(&body_bytes[pos..]) {
-            let r = newline.range();
-            
-            // If there isn't a newline directly after the boundary pattern,
-            // just return zero parts.
-            if r.start != 0 {
-                return Body::Multipart(parts);
+    /*
+    Thus follows the multipart body chunking code. It grovels through the body
+    of a multipart/form-data request (`body_bytes`), identifying the beginning
+    and end of each part, and pushing the corresponding slice of bytes (a
+    subslice of `body_bytes`) onto the `chunks` vector.
+    */
+        
+    // First we set our initial position just after the first occurrence of
+    // the boundary byte sequence.
+    let mut position = match slicey_find(body_bytes, boundary_bytes) {
+        Some(n) => {
+            // If the boundary is found in the body, check to ensure there is
+            // more body left after the end of the boundary (so we don't)
+            // panic in our subsequent subslicing.
+            let end_idx = n + boundary_bytes.len();
+            if body_bytes.len() > end_idx {
+                // If there _is_ more body left after the boundary, check
+                // whether the boundary is immediately followed by a newline
+                // pattern.
+                let mut imm_nl = LuaPattern::new(IMMEDIATE_NEWLINE);
+                if imm_nl.matches_bytes(&body_bytes[end_idx..]) {
+                    // If so, set our starting position to be immediately
+                    // after the newline pattern.
+                    end_idx + imm_nl.range().end
+                } else {
+                    // If the boundary _isn't_ immediately followed by a
+                    // newline pattern, just return a `Body::Multipart`
+                    // with an empty vector of parts.`
+                    //
+                    // *** Should this be an error instead?
+                    return Body::Multipart(parts);
+                }
             } else {
-                pos + r.end
+                // If there isn't any more body after the first occurrence of
+                // the boundary, just return a `Body::Multipart` with an
+                // empty vector of parts.
+                //
+                // *** Should this be an error instead?
+                return Body::Multipart(parts);
             }
-        } else {
-            // If there aren't any more newlines after the boundary pattern,
-            // just go ahead and return zero parts.
-            return Body::Multipart(parts);
-        }
-    } else {
-        let estr = "boundary string not found in multipart body".to_string();
-        return Body::Err(Error::InputError(estr));
+        },
+        None => {
+            // If the boundary isn't found in the body, return an error
+            // indicating as much.
+            let estr = "multipart body missing boundary string".to_string();
+            return Body::Err(Error::InputError(estr));
+        },
     };
     
     log::debug!("  initial boundary position: {}", &position);
     
-    // After the initial boundary, all occurrences of the boundary pattern
-    // _should_ have newlines directly before them that _aren't_ part of the
-    // previous part.
-    patt_string.insert_str(0, HTTP_NEWLINE);
-    log::debug!("  subsequent patternized string: {:?}", &patt_string);
-    let mut boundary = LuaPattern::new(&patt_string);
-    
-    // Seek subsequent appearances of the boundary pattern and separate
-    // the body into chunks.
-    while boundary.matches_bytes(&body_bytes[position..]) {
-        let boundary_range = boundary.range();
-        let boundary_start = position + boundary_range.start;
-        let boundary_end = position + boundary_range.end;
-        log::debug!("    next boundary range: {}..{}", &boundary_start, &boundary_end);
-        log::debug!("    chunk range: {}..{}", &position, &boundary_start);
-        chunks.push(&body_bytes[position..boundary_start]);
-        position = boundary_end;
+    // Now we find subesequent occurrences of a newline pattern immediately
+    // followed by a boundary.
+    while let Some(next_position) = find_next_multipart_chunk_end(
+        body_bytes, position, boundary_bytes, &mut newline
+    ) {
+        // Declare a chunk that goes from the previous `position` up to (but
+        // not including) the newline pattern, and push it onto the vector
+        // of chunks.
+        let chunk = &body_bytes[position..next_position];
+        chunks.push(chunk);
+        
+        // If the boundary is then immediately followed by another newline,
+        // pattern set the `position` (the beginning of the next chunk) to
+        // be immediately after the newline pattern.
+        //
+        // Otherwise, be finished finding chunks (the final boundary pattern)
+        // should be immediately followed by "--".
+        position = next_position + boundary_bytes.len();
+        if newline.matches_bytes(&body_bytes[position..]) {
+            position += newline.range().end;
+        } else {
+            break;
+        }
     }
+    
     log::debug!("  read {} multipart chunks", &chunks.len());
     
-    // Process the chunks by separating them into headers and data.
+    /*
+    Now all the chunks have been found, it's time to process each one into
+    a `MultipartPart` struct which contains a map of headers and a vector
+    of bytes for the individual parts' body.
+    */
     for chunk in chunks.iter() {
         match read_multipart_chunk(chunk) {
-            Err(_) => { /* ignore this error */ },
+            Err(_) => {
+                // If there is an error with a given multipart chunk, it is
+                // just ignored. There is not a simple way to indicate
+                // errors in individual chunks to the consumer of this
+                // library.
+            },
             Ok(mpp) => parts.push(mpp),
         }
     }
@@ -224,9 +321,9 @@ fn read_body(body_len: usize, content_type: Option<&str>) -> Body {
 }
 
 
-impl Cgi {
-    pub fn new() -> Result<Cgi, Error> {
-        log::debug!("Cgi::new() called");
+impl Request {
+    pub fn new() -> Result<Request, Error> {
+        log::debug!("Request::new() called");
         let mut http_patt = LuaPattern::new("^HTTP_(.+)$");
         
         let mut vars: HashMap<String, String> = HashMap::new();
@@ -268,7 +365,7 @@ impl Cgi {
             Body::None
         };
         
-        Ok(Cgi { vars, headers, body })
+        Ok(Request { vars, headers, body })
     }
 
     /**
@@ -280,9 +377,9 @@ impl Cgi {
     # Examples
     
     ```ignore
-    let cgi = Cgi::new().unwrap();
+    let r = Request::new().unwrap();
     
-    println!("{}", cgi.var("METHOD"));
+    println!("{}", r.var("METHOD"));
     // Probably Some("GET") or Some("POST").
     ```
     */    
@@ -310,9 +407,9 @@ impl Cgi {
     # Examples
     
     ```ignore
-    let cgi = Cgi::new().unwrap();
+    let r = Request::new().unwrap();
     
-    println!("{}", cgi.var("content-type"));
+    println!("{}", r.var("content-type"));
     // None (if it's a GET request) or something like Some("text/json")
     // or Some("multipart/formdata").
     ````

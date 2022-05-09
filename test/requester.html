@@ -9,6 +9,13 @@
 <body>
 <h1>Request Exploration Test Harness</h1>
 
+<p id="version">
+  HT Version: 2<br>
+  JS Version: <span id="jsv"></span>
+</p>
+
+<div id="status"></div>
+
 <div>
   <h3>Post Form w/ File</h3>
   <form id="post_with_file name="post_with_file">
@@ -21,6 +28,18 @@
     <label for="f0_submit">submit</label>
     <button type="button" id="f0_submit">submit</button>
   </form>
+</div>
+
+<div>
+  Select endpoint:<br>
+  <br>
+  <input type="radio" name="endpoint" id="ep_old"
+    value="https://d2718.net/cgi-bin/cgit.cgi" checked>
+  <label for="ep_old">old</label><br>
+  
+  <input type="radio" name="endpoint" id="ep_new"
+    value="https://d2718.net/cgi-bin/testor.cgi">
+  <label for="ep_new"><code>dumb_cgi</code></label><br>
 </div>
 
 <div id="output"></div>

@@ -7,7 +7,9 @@ in a bunch of full-featured crates. `dumb_cgi` does not attempt (or at least
 won't start off attempting) to be resource-efficient; its chief goals are
 simplicity and ease of use. Some trade-offs it makes are:
 
-  * It does a lot of copying and makes a lot of small allocations.
+  * It does a lot of copying and makes a lot of small allocations. This
+    makes it easier to use (and write), but it carries a performance and
+    resource usage penalty.
   
   * It forces lossy conversion of all environment variable and header names
     and values to UTF-8 (so they can be stored as `String`s). The spec
@@ -20,4 +22,5 @@ simplicity and ease of use. Some trade-offs it makes are:
 
 ## To Do
 
-More stress testing.
+  * More stress testing.
+  * Perhaps implement a `Response` type to make writing responses easier.
