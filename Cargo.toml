@@ -1,13 +1,12 @@
 [package]
 name = "dumb_cgi"
 description = "An adequate CGI library for server-side CGI programs"
-version = "0.2.0"
+version = "0.3.0"
 repository = "https://github.com/d2718/dumb-cgi"
 license = "MIT"
 edition = "2021"
 
 [dependencies]
-lua-patterns = "^0.4"
 log = "^0.4"
 
 simplelog = { version = "^0.12", optional = true }

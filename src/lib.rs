@@ -4,13 +4,11 @@ headers, and body.
 */
 use std::collections::{HashMap, hash_map};
 use std::io::Read;
-use lua_patterns::LuaPattern;
 
 const MULTIPART_CONTENT_TYPE: &str = "multipart/form-data";
 const MULTIPART_BOUNDARY: &str = "boundary=";
-const HTTP_NEWLINE: &str = "\r?\n";
-const IMMEDIATE_NEWLINE: &str = "^\r?\n";
-const MULTIPART_HEADER: &str = "([^:]-)%:(.-)\r?\n";
+const HTTP_NEWLINE: &[u8] = "\r\n".as_bytes();
+const HTTP_PREFIX: &str = "HTTP_";
 
 /*
 Return the offset of the beginning of `needle` in `haystack` (or `None`
@@ -90,30 +88,47 @@ impl<'a> Iterator for Vars<'a> {
 }
 
 /*
+Given a slice of bytes, attempt to parse it as an HTTP header-style line
+and return a `(name, value)` tuple.
+
+Both `name` and `value` will be lossily converted to UTF-8. The `name` will
+then have surrounding whitespace trimmed and be forced to lower-case; the
+`value` will have _leading_ whitespace trimmed but otherwise left as-is. 
+*/
+fn match_header(bytes: &[u8]) -> Option<(String, String)> {
+    const COLON: u8 = ':' as u8;
+    let sep_idx = match bytes.iter().position(|b| *b == COLON) {
+        Some(n) => n,
+        None => { return None; }
+    };
+    let key = String::from_utf8_lossy(&bytes[..sep_idx])
+        .trim().to_lowercase().to_string();
+    let val = String::from_utf8_lossy(&bytes[(sep_idx+1)..])
+        .trim_start().to_string();
+    Some((key, val))
+}
+
+/*
 Return the index of the next newline (after `current_position`) in `bytes`
 that is immediately followed by `boundary`. This should be the first byte
 after the end of the multipart/form-data body chunk that begins on or
 after `current_position`.
-
-`nl_patt` is a mutable reference to a `LuaPattern` built from "\r?\n",
-which should match both strictly conforming HTTP metadata newlines
-and also just regular Unicious newlines.
 */
 fn find_next_multipart_chunk_end(
     bytes: &[u8],
     current_position: usize,
     boundary: &[u8],
-    nl_patt: &mut LuaPattern
 ) -> Option<usize> {
     let mut pos = current_position;
     let mut subslice = &bytes[pos..];
-    while nl_patt.matches_bytes(subslice) {
-        let range = nl_patt.range();
-        subslice = &bytes[(pos + range.end)..];
-        if subslice.starts_with(boundary) {
-            return Some(pos + range.start);
-        } else {
-            pos = pos + range.end;
+    while let Some(n) = slicey_find(subslice, HTTP_NEWLINE) {
+        let post_newline_idx = pos + n + HTTP_NEWLINE.len();
+        if bytes.len() > post_newline_idx {
+            subslice = &bytes[post_newline_idx..];
+            if subslice.starts_with(boundary) {
+                return Some(pos + n);
+            }
+            pos = post_newline_idx;
         }
     }
     None
@@ -124,27 +139,21 @@ Takes a reference to a chunk of a multipart body that falls between two
 boundaries, and returns that information in a `MultipartPart` struct.
 */
 fn read_multipart_chunk(chunk: &[u8]) -> Result<MultipartPart, String> {
-    let mut patt = LuaPattern::new(MULTIPART_HEADER);
     let mut position: usize = 0;
     let mut headers: HashMap<String, String> = HashMap::new();
     
-    while patt.matches_bytes(&chunk[position..]) {
-        let k_range = patt.capture(1);
-        let v_range = patt.capture(2);
-        let (ks, ke) = (position + k_range.start, position + k_range.end);
-        let (vs, ve) = (position + v_range.start, position + v_range.end);
-        let k = String::from_utf8_lossy(&chunk[ks..ke]).trim().to_string();
-        let v = String::from_utf8_lossy(&chunk[vs..ve])
-                .trim_start().to_string();
-        
-        headers.insert(k, v);
-        position = position + patt.range().end;
-    }
-    let post_header = &chunk[position..];
-    if post_header.starts_with(b"\r\n") {
-        position += 2;
-    } else {
-        position += 1;
+    while let Some(n) = slicey_find(
+        &chunk[position..],
+        HTTP_NEWLINE
+    ) {
+        let next_pos = position + n;
+        if let Some((k, v)) = match_header(&chunk[position..next_pos]) {
+            headers.insert(k, v);
+            position = next_pos + HTTP_NEWLINE.len();
+        } else {
+            position = next_pos + HTTP_NEWLINE.len();
+            break;
+        }
     }
     
     let body: Vec<u8> = chunk[position..].to_vec();
@@ -180,13 +189,8 @@ fn read_multipart_body(
     };
     let boundary_bytes = &prepended_boundary.as_bytes();
     
-    // The newline pattern will match either `LF` or `CRLF`, which makes this
-    // more of a pain, but which also supports slightly non-conforming request
-    // bodies. It is morally acceptable to support requests which fail to
-    // conform in this particular way, because the whole "\r\n" thing is
-    // obnoxious.
-    let mut newline = LuaPattern::new(HTTP_NEWLINE);
-    
+    // This will hold subslices of `body_bytes`, each of which will contain
+    // the raw bytes of one "part" of the multipart body.    
     let mut chunks: Vec<&[u8]> = Vec::new();
     
     /*
@@ -204,19 +208,18 @@ fn read_multipart_body(
             // more body left after the end of the boundary (so we don't)
             // panic in our subsequent subslicing.
             let end_idx = n + boundary_bytes.len();
-            if body_bytes.len() > end_idx {
+            let nl_end_idx = end_idx + HTTP_NEWLINE.len();
+            if body_bytes.len() > nl_end_idx {
                 // If there _is_ more body left after the boundary, check
-                // whether the boundary is immediately followed by a newline
-                // pattern.
-                let mut imm_nl = LuaPattern::new(IMMEDIATE_NEWLINE);
-                if imm_nl.matches_bytes(&body_bytes[end_idx..]) {
+                // whether the boundary is immediately followed by a newline.
+                if &body_bytes[end_idx..nl_end_idx] == HTTP_NEWLINE {
                     // If so, set our starting position to be immediately
-                    // after the newline pattern.
-                    end_idx + imm_nl.range().end
+                    // after the newline.
+                    nl_end_idx
                 } else {
                     // If the boundary _isn't_ immediately followed by a
-                    // newline pattern, just return a `Body::Multipart`
-                    // with an empty vector of parts.`
+                    // newline, just return a `Body::Multipart` with an empty
+                    // vector of parts.`
                     //
                     // *** Should this be an error instead?
                     return Body::Multipart(parts);
@@ -243,23 +246,27 @@ fn read_multipart_body(
     // Now we find subesequent occurrences of a newline pattern immediately
     // followed by a boundary.
     while let Some(next_position) = find_next_multipart_chunk_end(
-        body_bytes, position, boundary_bytes, &mut newline
+        body_bytes, position, boundary_bytes
     ) {
         // Declare a chunk that goes from the previous `position` up to (but
-        // not including) the newline pattern, and push it onto the vector
-        // of chunks.
+        // not including) the newline, and push it onto the vector of chunks.
         let chunk = &body_bytes[position..next_position];
         chunks.push(chunk);
         
         // If the boundary is then immediately followed by another newline,
-        // pattern set the `position` (the beginning of the next chunk) to
-        // be immediately after the newline pattern.
+        // set the `position` (the beginning of the next chunk) to be
+        // immediately after the newline.
         //
         // Otherwise, be finished finding chunks (the final boundary pattern)
         // should be immediately followed by "--".
-        position = next_position + boundary_bytes.len();
-        if newline.matches_bytes(&body_bytes[position..]) {
-            position += newline.range().end;
+        position = next_position + HTTP_NEWLINE.len() + boundary_bytes.len();
+        let post_newline_pos = position + HTTP_NEWLINE.len();
+        if body_bytes.len() >= post_newline_pos {
+            if &body_bytes[position..post_newline_pos] == HTTP_NEWLINE {
+                position = post_newline_pos;
+            } else {
+                break;
+            }
         } else {
             break;
         }
@@ -276,9 +283,8 @@ fn read_multipart_body(
         match read_multipart_chunk(chunk) {
             Err(_) => {
                 // If there is an error with a given multipart chunk, it is
-                // just ignored. There is not a simple way to indicate
-                // errors in individual chunks to the consumer of this
-                // library.
+                // just ignored. There is not a simple way to indicate errors
+                // in individual chunks to the consumer of this library.
             },
             Ok(mpp) => parts.push(mpp),
         }
@@ -324,7 +330,6 @@ fn read_body(body_len: usize, content_type: Option<&str>) -> Body {
 impl Request {
     pub fn new() -> Result<Request, Error> {
         log::debug!("Request::new() called");
-        let mut http_patt = LuaPattern::new("^HTTP_(.+)$");
         
         let mut vars: HashMap<String, String> = HashMap::new();
         let mut headers: HashMap<String, String> = HashMap::new();
@@ -334,17 +339,15 @@ impl Request {
             let str_v = String::from(os_v.to_string_lossy());
             (str_k, str_v)
         }) {
-            match http_patt.match_maybe(&k) {
-                Some(var) => {
-                    let lower_k = var.replace('_', "-").to_lowercase();
-                    log::debug!("  \"{}\" -> \"{}\", value: \"{}\"", &k, &lower_k, &v);
-                    headers.insert(lower_k, String::from(v));
-                },
-                None => {
-                    let upper_k = k.to_uppercase();
-                    log::debug!("  \"{}\" -> \"{}\", value: \"{}\"", &k, &upper_k, &v);
-                    vars.insert(upper_k, String::from(v));
-                }
+            if k.starts_with(HTTP_PREFIX) {
+                let head_name = &k[HTTP_PREFIX.len()..];
+                let lower_k = head_name.replace('_', "-").to_lowercase();
+                log::debug!("  \"{}\" -> \"{}\", value: \"{}\"", &k, &lower_k, &v);
+                headers.insert(lower_k, String::from(v));
+            } else {
+                let upper_k = k.to_uppercase();
+                log::debug!("  \"{}\" -> \"{}\", value: \"{}\"", &k, &upper_k, &v);
+                vars.insert(upper_k, String::from(v));
             }
         }
         

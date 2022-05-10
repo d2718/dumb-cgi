@@ -1,5 +1,5 @@
 # dumb-cgi
-An adequate CGI library in Rust.
+An adequate, essentially dependencyless CGI library in Rust.
 
 The purpose of this library is to allow server-side CGI programs to easily
 parse requests (in particular "multipart/formdata" requests) without pulling
@@ -23,4 +23,17 @@ simplicity and ease of use. Some trade-offs it makes are:
 ## To Do
 
   * More stress testing.
+  * Handle GET requests more intentionally; specifically, parse the
+    query string.
   * Perhaps implement a `Response` type to make writing responses easier.
+
+
+## Notes
+
+  * v 0.3.0: Removed dependence on
+    [`lua-patterns`](https://crates.io/crates/lua-patterns),
+    because even though I like the idea of it, and it has worked well for
+    me in other projects, it kept panicing. `dumb_cgi` now depends only
+    on the [`log`](https://crates.io/crates/log) logging facade (and
+    [`simplelog`](https://crates.io/crates/simplelog) if you actually
+    want to do some logging and enable the `log` feature).
