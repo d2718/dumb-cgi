@@ -19,12 +19,16 @@ simplicity and ease of use. Some trade-offs it makes are:
     meaningfully be converted to UTF-8, then this crate is too dumb for
     your use case.
 
+  * Its intended use case is server-side CGI programs only. It supports
+    _reading_ requests, but not making them, and only supports the parts
+    of the HTTP-verse directly related to reading and parsing CGI requests.
+
 
 ## To Do
 
   * More stress testing.
-  * Handle GET requests more intentionally; specifically, parse the
-    query string.
+  * ~~Handle GET requests more intentionally; specifically, parse the
+    query string.~~ done in v 0.4.0
   * Perhaps implement a `Response` type to make writing responses easier.
 
 
@@ -37,3 +41,5 @@ simplicity and ease of use. Some trade-offs it makes are:
     on the [`log`](https://crates.io/crates/log) logging facade (and
     [`simplelog`](https://crates.io/crates/simplelog) if you actually
     want to do some logging and enable the `log` feature).
+    
+  * v 0.4.0: Added explicit query string parsing.

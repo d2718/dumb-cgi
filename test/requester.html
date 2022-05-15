@@ -10,24 +10,55 @@
 <h1>Request Exploration Test Harness</h1>
 
 <p id="version">
-  HT Version: 2<br>
+  HT Version: 3.1<br>
   JS Version: <span id="jsv"></span>
 </p>
 
 <div id="status"></div>
 
-<div>
-  <h3>Post Form w/ File</h3>
-  <form id="post_with_file name="post_with_file">
-    <label for="f0_file">file</label>
-    <input type="file" name="file" id="f0_file">
+<div id="forms-container">
+  <div>
+    <h3>Post Form w/ File</h3>
+    <form id="post_with_file name="post_with_file">
     
-    <label for="f0_text">text</label>
-    <input type="text" name="text" id="f0_text">
+      <label for="f0_file">file</label>
+      <input type="file" name="file" id="f0_file">
     
-    <label for="f0_submit">submit</label>
-    <button type="button" id="f0_submit">submit</button>
-  </form>
+      <label for="f0_text">text</label>
+      <input type="text" name="text" id="f0_text">
+    
+      <label for="f0_submit">submit</label>
+      <button type="button" id="f0_submit" data-method="POST">
+        submit
+      </button>
+      
+    </form>
+  </div>
+  
+  <div>
+    <h3>Get Form</h3>
+    <form id="post_get" name="post_get" method="GET"
+          action="https://d2718.net/cgi-bin/testor.cgi">
+    
+      <label for="f1_text">text</label>
+      <input type="text" name="text" id="f1_text">
+    
+      <label for="f1_date">date</label>
+      <input type="date" name="date" id="f1_date">
+  
+      <label for="f1_color">color</label>
+      <input type="color" name="color" id="f1_color">
+    
+      <label for="f1_option">option</label>
+      <input type="checkbox" name="option" id="f1_option">
+    
+      <label for "f1_submit">submit</label>
+      <input type="submit" id="f1_submit" data-method="GET"
+             value="Submit">
+
+    </form>
+  </div>
+    
 </div>
 
 <div>

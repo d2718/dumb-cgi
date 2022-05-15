@@ -5,6 +5,16 @@ body {
 
 p#id, p#status { font-family: monospace; }
 
+div.forms-container {
+  display: flex;
+  justify-content: flex-start;
+  gap: 2em;
+}
+
+div.forms-container > div {
+  display: inline-block;
+}
+
 form {
   display: inline-grid;
   grid-template-columns: auto, auto;

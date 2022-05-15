@@ -3,7 +3,7 @@ requester.js
 
 Javascript for implementing request exploration test harness
 */
-const VERSION = "2.1";
+const VERSION = "3.2";
 
 const OUTPUT = document.getElementById("output");
 const STATUS = document.getElementById("status");
@@ -31,12 +31,16 @@ function set_status(txt) {
 
 function submit_form(elt) {
   const form = elt.target.form;
+  const submit_method = elt.target.getAttribute("data-method");
   const data = new FormData(form);
   const uri = document.querySelector('input[name = "endpoint"]:checked').value;
   
+  console.log(`fetching (${submit_method}): ${uri}`);
+  console.log(data);
+  
   set_status(`fetching: ${uri}`);
   
-  fetch(uri, { method: "POST", body: data })
+  fetch(uri, { method: submit_method, body: data })
   .then(r => {
     r.text()
     .then(t => {

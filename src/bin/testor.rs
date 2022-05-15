@@ -8,7 +8,7 @@ const BODY_PREV: usize = 8;
 
 #[cfg(feature = "log")]
 use simplelog::{WriteLogger, LevelFilter, Config};
-use dumb_cgi::{Body, Request};
+use dumb_cgi::{Body, Query, Request};
 
 #[derive(Debug)]
 struct ErrorShim(String);
@@ -37,6 +37,22 @@ fn wrapped_main() -> Result<String, ErrorShim> {
     write!(&mut r, "Exposed Headers:\n")?;
     for (k, v) in cgi.headers() {
         write!(&mut r, "    {}: {}\n", k, v)?;
+    }
+    
+    write!(&mut r, "\n")?;
+    match cgi.query() {
+        Query::None => {
+            write!(&mut r, "No query string.\n")?;
+        }
+        Query::Some(map) => {
+            write!(&mut r, "Query analysis:\n")?;
+            for (k, v) in map.iter() {
+                write!(&mut r, "    {}: {}\n", k, v)?;
+            }
+        }
+        Query::Err(e) => {
+            write!(&mut r, "Error w/query string: {:?}", &e)?;
+        }
     }
     
     write!(&mut r, "\n")?;

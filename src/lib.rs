@@ -1,6 +1,97 @@
 /*!
-Types and methods for parsing/detecting/reporting your CGI environment,
-headers, and body.
+`dumb_cgi` is a library for collecting all the information made available by
+the web server to a CGI program into a single, easy-to-use struct.
+
+```ignore
+//! This example isn't tested, but is essentially taken verbatim from
+//! `src/bin/testor.rs` from the repo.
+
+use dumb_cgi::{Request, Query, Body};
+
+// Your web server will return 500 if there's an error here.
+let req = match Request::new().unwrap();
+
+// This only works if your web server and user agent will correctly deal with
+// responses that have bodies but no `content-length` header. The Right Thing
+// to do here is to write all your output to a buffer first, then send the
+// length of the buffer as a `content-length` header, but that complicates the
+// example.
+print!("Result: 200 OK\r\n");
+print!("Content-type: text/plain\r\n\r\n");
+
+println!("Environment Variables:");
+for (var, value) in req.vars() {
+    println!("    {}={}", var, value);
+}
+
+println!("\nExposed HTTP Headers:");
+for (header, value) in req.headers() {
+    println!("    {}: {}", header, value);
+}
+
+match req.query() {
+    Query::None => { println!("\nNo query string."); },
+    Query::Some(map) => {
+        println!("\nQuery String Form Data:");
+        for (name, value) in map.iter() {
+            println!("    {}={}", name, value);
+        }
+    },
+    Query::Err(e) => { println!("\nError reading query string: {:?}", &e); },
+}
+
+match req.body() {
+    Body::None => { println!("\nNo body."); },
+    Body::Some(bytes) => { println!("\n{} bytes of body.", bytes.len()); },
+    Body::Multipart(parts) => {
+        println!("\nMultipart body with {} parts:", parts.len());
+        for (n, part) in parts.iter().enumerate() {
+            println("\n    Part {}:", &n);
+            for (header, value) in part.headers.iter() {
+                println!("        {}: {}", header, value);
+            }
+            println!("        {} bytes of body.", part.body.len());
+        }
+    },
+    Body::Err(e) => { println!("\nError reading body: {:?}", &e); },
+}
+```
+
+The emphases are lack of dependencies and simplicity (both in use and in
+maintenance). In pursuit of these, some trade-offs have been made.
+
+  * Some CGI libraries use high-performance or fault-tolerant parsing
+    techniques (like regular expressions). `dumb_cgi` is pretty
+    straight-forward and doesn't go out of its way to deal with
+    non- or almost-compliant requests, or even certain
+    strictly-compliant cases that are unlikely and awkward to support.
+
+  * Some libraries are fast and memory-efficient by avoiding allocation;
+    they keep the body of the request around and only hand out references
+    to parts of it. `dumb_cgi` copies and owns the parts of the request
+    (and the environment) that it needs. This is simpler to both use
+    and maintain.
+
+  * `dumb_cgi` lossily converts everything except request bodies (and the
+    "body" portions of `multipart/form-data` body parts) into UTF-8.
+    This means not supporting certain strictly-compliant requests and
+    possibly not correctly receiving environment variables on some systems,
+    but is easier to both use and maintain. (If you _do_ need to deal
+    with non-UTF-8 environment variables or header values, `dumb_cgi` is
+    too dumb for your use case.)
+
+  * `dumb_cgi`'s target is server-side CGI programs; it supports _reading_
+    requests (not writing them).
+
+# Features
+
+`dumb_cgi` is _almost_ dependencyless. It requires only the logging facade
+provided by the [`log`](https://crates.io/crates/log) crate. This only
+gets _used_ if the `log` feature is enabled (also pulling in
+[`simplelog`](https://crates.io/crates/simplelog)), which is really only for
+debugging the functionality of `dumb_cgi` during its development.
+Consumers of this crate shouldn't need it.
+
 */
 use std::collections::{HashMap, hash_map};
 use std::io::Read;
@@ -8,7 +99,108 @@ use std::io::Read;
 const MULTIPART_CONTENT_TYPE: &str = "multipart/form-data";
 const MULTIPART_BOUNDARY: &str = "boundary=";
 const HTTP_NEWLINE: &[u8] = "\r\n".as_bytes();
+/// Prefix used to identify whether an environment variable is actually
+/// an HTTP header being passed on to the script.
 const HTTP_PREFIX: &str = "HTTP_";
+
+const PLUS: u8 = '+' as u8;
+const PERCENT: u8 = '%' as u8;
+const SPACE: u8 = ' ' as u8;
+
+/**
+Errors returned by this libraray.
+
+Each variant contains a String which should have some explanatory text
+about the specific nature of the error.
+*/
+#[derive(Debug)]
+pub enum Error {
+    /// An error was caused due to the way the web server set up the
+    /// CGI environment.
+    EnvironmentError(String),
+    /// There was something about the request that couldn't be processed.
+    /// (It was probably "bad", i.e., 400-worthy.)
+    InputError(String),
+}
+
+impl Error {
+    // Consumes the Error, returning the String within.
+    pub fn string(self) -> String {
+        match self {
+            Error::EnvironmentError(s) => s,
+            Error::InputError(s) => s,
+        }
+    }
+    
+    // Exposes the &str within.
+    pub fn str(&self) -> &str {
+        match self {
+            Error::EnvironmentError(s) => &s,
+            Error::InputError(s) => &s,
+        }
+    }
+}
+
+/*
+Attempt to decode a %-encoded string (like in a CGI query string).
+*/
+fn url_decode(qstr: &str) -> Result<String, Error> {
+    let bytes = qstr.as_bytes();
+    let mut rbytes: Vec<u8> = Vec::with_capacity(qstr.len());
+    let mut idx: usize = 0;
+    
+    while idx < bytes.len() {
+        // This is safe because, per the preceding line, `idx` is guaranteed
+        // to be less than the length of `bytes`.
+        let &b = unsafe { bytes.get_unchecked(idx) };
+        if b == PLUS {
+            rbytes.push(SPACE);
+            idx += 1;
+        } else if b == PERCENT {
+            let (start, end) = (idx + 1, idx + 3);
+            match bytes.get(start..end) {
+                Some(substr) => match std::str::from_utf8(substr) {
+                    Ok(txt) => match u8::from_str_radix(txt, 16) {
+                        Ok(n) => {
+                            rbytes.push(n);
+                            idx += 3;
+                        },
+                        Err(e) => {
+                            let estr = format!(
+                                "Error with %-encoding at byte {}: {}",
+                                &idx, &e
+                            );
+                            return Err(Error::InputError(estr));
+                        },
+                    },
+                    Err(e) => {
+                        let estr = format!(
+                            "Error with %-encoding at byte {}: {}",
+                            &idx, &e
+                        );
+                        return Err(Error::InputError(estr));
+                    },
+                },
+                None => {
+                    let estr = format!(
+                        "Error with %-encoding at byte {}: string ended during escape sequence.",
+                        &idx
+                    );
+                    return Err(Error::InputError(estr));
+                },
+            }
+        } else {
+            rbytes.push(b);
+            idx += 1;
+        }
+    }
+    
+    rbytes.shrink_to_fit();
+    match String::from_utf8(rbytes) {
+        Ok(s) => Ok(s),
+        Err(e) => Err(Error::InputError(format!("Not valid UTF-8: {}", &e))),
+    }
+}
 
 /*
 Return the offset of the beginning of `needle` in `haystack` (or `None`
@@ -31,11 +223,6 @@ fn slicey_find<T: Eq>(haystack: &[T], needle: &[T]) -> Option<usize> {
     None
 }
 
-#[derive(Debug)]
-pub enum Error {
-    EnvironmentError(String),
-    InputError(String),
-}
 
 /**
 Struct holding a single part of a multipart/formdata body.
@@ -51,11 +238,48 @@ pub struct MultipartPart {
     pub body: Vec<u8>,
 }
 
+/**
+Type of body detected in the request.
+
+This is not detected from the request method, but rather from the presence
+(and values) of the `content-length` and `content-type` headers.
+*/
 #[derive(Debug)]
 pub enum Body {
+    /// The request has no `content-length` header.
     None,
+    /// The request has a `content-length` header, but the `content-type`
+    /// is something _other_ than `multipart/form-data.`
     Some(Vec<u8>),
+    /// The request has a `content-length` header, and the `content-type`
+    /// _is_ `multipart/form-data`. This will contain a vector of
+    /// successfully-parsed body parts.
     Multipart(Vec<MultipartPart>),
+    /// There was an error at some point in the process of determining the
+    /// type of or reading/parsing the body.
+    Err(Error),
+}
+
+/**
+Type of query string detected in the request.
+
+This is not detected from the request method, but rather the presence
+and content of the `QUERY_STRING` environment variable.
+*/
+#[derive(Debug)]
+pub enum Query {
+    /// No `QUERY_STRING` environment variable.
+    None,
+    /// The `QUERY_STRING` environment variable's value was successfully
+    /// split into `name=value` form data pairs and percent-decoded.
+    Some(HashMap<String, String>),
+    /// There was an error processing the value of the `QUERY_STRING`
+    /// environment variable.
+    ///
+    /// This will happen if the query string isn't properly percent-encoded
+    /// or formatted in `&`-separated `name=value` pairs. If this is the
+    /// case, you can always get access to the raw value of the query
+    /// string throught the `Request::var()` method.
     Err(Error),
 }
 
@@ -67,12 +291,16 @@ that has been made to your program.
 pub struct Request {
     vars: HashMap<String, String>,
     headers: HashMap<String, String>,
+    query: Query,
     body: Body,
 }
 
 /**
 An iterator over a `HashMap<String, String>` that yields
 `(&'str, &'str)` tuples.
+
+This is returned by the `Request::vars()` and `Request::headers()` methods,
+for iterating over environment variables and request headers, respectively.
 */
 pub struct Vars<'a>(hash_map::Iter<'a, String, String>);
 
@@ -85,6 +313,50 @@ impl<'a> Iterator for Vars<'a> {
             Some((k, v)) => Some((k.as_str(), v.as_str())),
         }
     }
+}
+
+/*
+Attempt to return the form data that's been URL percent-encoded
+and chunked into `&`-separated `name=value` pairs in the query
+string.
+*/
+fn parse_query_string(qstr: &str) -> Query {
+    let mut qmap: HashMap<String, String> = HashMap::new();
+    
+    for nvp in qstr.split('&') {
+        match nvp.split_once('=') {
+            Some((coded_name, coded_value)) => {
+                let name = match url_decode(coded_name) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let estr = format!(
+                            "Error with chunk \"{}={}\": {}",
+                            coded_name, coded_value, &e.str()
+                        );
+                        return Query::Err(Error::InputError(estr));
+                    },
+                };
+                let value = match url_decode(coded_value) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let estr = format!(
+                            "Error with chunk \"{}={}\": {}",
+                            coded_name, coded_value, &e.str()
+                        );
+                        return Query::Err(Error::InputError(estr));
+                    },
+                };
+                
+                qmap.insert(name, value);
+            }
+            None => {
+                let estr = format!("Chunk \"{}\" not a name=value pair.", nvp);
+                return Query::Err(Error::InputError(estr));
+            }, 
+        }
+    }
+    
+    Query::Some(qmap)
 }
 
 /*
@@ -351,6 +623,11 @@ impl Request {
             }
         }
         
+        let query = match vars.get("QUERY_STRING") {
+            Some(qstr) => parse_query_string(qstr),
+            None => Query::None,
+        };
+        
         let body = if let Some(len_str) = headers.get("content-length") {
             match len_str.parse::<usize>() {
                 Err(e) => {
@@ -368,7 +645,7 @@ impl Request {
             Body::None
         };
         
-        Ok(Request { vars, headers, body })
+        Ok(Request { vars, headers, query, body })
     }
 
     /**
@@ -429,6 +706,11 @@ impl Request {
     pub fn headers<'a>(&'a self) -> Vars<'a> {
         Vars(self.headers.iter())
     }
+    
+    /**
+    Return a reference to the request's decoded query string (if present).
+    */
+    pub fn query<'a>(&'a self) -> &'a Query { &self.query }
     
     /**
     Return a reference to the request's body.
