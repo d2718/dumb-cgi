@@ -1,14 +1,14 @@
 /*!
 CGI program for testing this library.
 */
-use std::fmt::Write;
+use std::io::Write;
 
 const FULL_BODY_LIMIT: usize = 64;
 const BODY_PREV: usize = 8;
 
 #[cfg(feature = "log")]
 use simplelog::{WriteLogger, LevelFilter, Config};
-use dumb_cgi::{Body, Query, Request};
+use dumb_cgi::{Body, Query, Request, EmptyResponse, FullResponse};
 
 #[derive(Debug)]
 struct ErrorShim(String);
@@ -19,7 +19,7 @@ where D: std::fmt::Display,
     fn from(d: D) -> Self { Self(format!("{}", &d)) }
 }
 
-fn wrapped_main() -> Result<String, ErrorShim> {
+fn wrapped_main() -> Result<FullResponse, ErrorShim> {
     let cgi = match Request::new() {
         Ok(cgi) => cgi,
         Err(e) => {
@@ -28,7 +28,10 @@ fn wrapped_main() -> Result<String, ErrorShim> {
         },
     };
     
-    let mut r = String::new();
+    let mut r = EmptyResponse::new(200)
+        .with_content_type("text/plain");
+    
+    
     write!(&mut r, "Environment Variables:\n")?;
     for (k, v) in cgi.vars() {
         write!(&mut r, "    {}: {}\n", k, v)?;
@@ -99,17 +102,12 @@ fn main() {
     ).unwrap();
     match wrapped_main() {
         Err(e) => {
-            let estr = format!("{:?}", &e);
-            print!("Content-type: text/plain\r\n");
-            print!("Content-length: {}\r\n", &estr.len());
-            print!("\r\n");
-            print!("{}", &estr);
+            let err_body: Vec<u8> = e.0.into();
+            let r = EmptyResponse::new(500)
+                .with_content_type("text/plain")
+                .with_body(err_body);
+            r.respond().unwrap();
         },
-        Ok(out) => {
-            print!("Content-type: text/plain\r\n");
-            print!("Content-length: {}\r\n", &out.len());
-            print!("\r\n");
-            print!("{}", &out);
-        }
+        Ok(r) => { r.respond().unwrap() }
     }
 }

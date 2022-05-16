@@ -2,10 +2,11 @@
 An adequate, essentially dependencyless CGI library in Rust.
 
 The purpose of this library is to allow server-side CGI programs to easily
-parse requests (in particular "multipart/formdata" requests) without pulling
-in a bunch of full-featured crates. `dumb_cgi` does not attempt (or at least
-won't start off attempting) to be resource-efficient; its chief goals are
-simplicity and ease of use. Some trade-offs it makes are:
+parse requests (in particular "multipart/formdata" requests) and generate
+responses without pulling in a bunch of full-featured crates. `dumb_cgi`
+does not attempt (or at least won't start off attempting) to be
+resource-efficient; its chief goals are simplicity and ease of use. Some
+trade-offs it makes are:
 
   * It does a lot of copying and makes a lot of small allocations. This
     makes it easier to use (and write), but it carries a performance and
@@ -20,8 +21,9 @@ simplicity and ease of use. Some trade-offs it makes are:
     your use case.
 
   * Its intended use case is server-side CGI programs only. It supports
-    _reading_ requests, but not making them, and only supports the parts
-    of the HTTP-verse directly related to reading and parsing CGI requests.
+    _reading_ requests, but not making them, and _writing_ responses, but
+    not reading them,  and only supports the parts of the HTTP-verse directly
+    related to reading, parsing, and responding to CGI requests.
 
 
 ## To Do
@@ -29,7 +31,8 @@ simplicity and ease of use. Some trade-offs it makes are:
   * More stress testing.
   * ~~Handle GET requests more intentionally; specifically, parse the
     query string.~~ done in v 0.4.0
-  * Perhaps implement a `Response` type to make writing responses easier.
+  * ~~Perhaps implement a `Response` type to make writing responses
+    easier.~~ done in v 0.5.0
 
 
 ## Notes
@@ -43,3 +46,5 @@ simplicity and ease of use. Some trade-offs it makes are:
     want to do some logging and enable the `log` feature).
     
   * v 0.4.0: Added explicit query string parsing.
+  
+  * v 0.5.0 Added response types and functionality.
