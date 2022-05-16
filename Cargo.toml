@@ -3,8 +3,17 @@ name = "dumb_cgi"
 description = "An adequate CGI library for server-side CGI programs"
 version = "0.5.0"
 repository = "https://github.com/d2718/dumb-cgi"
+homepage = "https://github.com/d2718/dumb-cgi"
 license = "MIT"
 edition = "2021"
+
+keywords = ["cgi", "webdev"]
+categories = ["network-programming", "web-programming", "web-programming::http-server"]
+readme = "README.md"
+exclude = [
+  "test/*",
+  "src/bin/*"
+]
 
 [dependencies]
 log = "^0.4"
