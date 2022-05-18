@@ -12,3 +12,6 @@ Cargo.lock
 # This is a small build/deploy script for testing that certainly
 # doesn't need to live in the repo.
 rel.bash
+
+# Log file generated when testing.
+dumb_example.log

@@ -1,56 +1,8 @@
-# dumb-cgi
-An adequate, essentially dependencyless CGI library in Rust.
-
-The purpose of this library is to allow server-side CGI programs to easily
-parse requests (in particular "multipart/formdata" requests) and generate
-responses without pulling in a bunch of full-featured crates. `dumb_cgi`
-does not attempt (or at least won't start off attempting) to be
-resource-efficient; its chief goals are simplicity and ease of use. Some
-trade-offs it makes are:
-
-  * It does a lot of copying and makes a lot of small allocations. This
-    makes it easier to use (and write), but it carries a performance and
-    resource usage penalty.
-  
-  * It forces lossy conversion of all environment variable and header names
-    and values to UTF-8 (so they can be stored as `String`s). The spec
-    should guarantee that header names are valid UTF-8, but if you need
-    any of the other three (header values, environment variable names, or
-    environment variable values) to be something that can't correctly,
-    meaningfully be converted to UTF-8, then this crate is too dumb for
-    your use case.
-        
-  * It doesn't make any effort to try to parse improperly-formed or
-    almost-properly-formed requests, and it might even mishandle some
-    uncommon corner cases in order to simplify implementation. For instance,
-    the headers and blank lines in a multipart body part _must_ end with
-    "\r\n" (which is strictly conformant to the spec), even though plenty
-    of other HTTP implementations will still recognize plain ol' "\n"
-    line endings. This simplifies the implementation.
-
-  * Its intended use case is server-side CGI programs only. It supports
-    _reading_ requests, but not making them, and _writing_ responses, but
-    not reading them,  and only supports the parts of the HTTP-verse directly
-    related to reading, parsing, and responding to CGI requests.
-
-## Usage
-
-To illustrate both reading and responding to requests, below is a sample
-program that reads a request, logs the information about it, and then
-returns a cursory "success" response. If any of the `.unwrap()`s or
-`.expect()s` panic, the web server will just return a generic 500 response.
-
-For logging, we will use macros from the
-[`log`](https://crates.io/crates/log) logging facade (the sole required
-dependency of `dumb-cgi`) and the
-[`simplelog`](https://crates.io/crates/simplelog) logging crate (which
-becomes a dependency if you compile `dumb-cgi` with the `log` feature).
-
-```rust
-use dumb_cgi::{Request, EmptyResponse, Query, Body};
+use crate::{Request, EmptyResponse, Query, Body};
 use simplelog::{WriteLogger, LevelFilter, Config};
 
-fn main() {
+#[test]
+fn readme_main() {
     // Open the log file.
     WriteLogger::init(
         LevelFilter::max(),
@@ -175,31 +127,3 @@ fn main() {
     // response to stdout.
     response.respond().unwrap();
 }
-```
-
-Obviously, more details are available in the documentation.
-
-## To Do
-
-This may actually be more or less the final form of this crate (aside from bug
-fixes or usability tweaks). I have ideas for improvements, but they all
-drag this project dangerously into "less dumb" territory. Then again, I'm
-not particularly fond of the idea of maintaining both `dumb_cgi` and
-`not_quite_as_dumb_cgi`, so this may very well just feature creep and grow
-warts until I'm disgusted with it.
-
-## Notes
-
-  * v 0.3.0: Removed dependence on
-    [`lua-patterns`](https://crates.io/crates/lua-patterns),
-    because even though I like the idea of it, and it has worked well for
-    me in other projects, it kept panicing. `dumb_cgi` now depends only
-    on the [`log`](https://crates.io/crates/log) logging facade (and
-    [`simplelog`](https://crates.io/crates/simplelog) if you actually
-    want to do some logging and enable the `log` feature).
-    
-  * v 0.4.0: Added explicit query string parsing.
-  
-  * v 0.5.0: Added response types and functionality.
-    
-  * v 0.6.0: Changed `Error` type and error handling.

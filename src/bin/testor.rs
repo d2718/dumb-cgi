@@ -23,7 +23,10 @@ fn wrapped_main() -> Result<FullResponse, ErrorShim> {
     let cgi = match Request::new() {
         Ok(cgi) => cgi,
         Err(e) => {
-            let estr = format!("Unable to parse environment: {:?}", e);
+            let estr = format!(
+                "Unable to parse environment: {:?}",
+                &e.details
+            );
             return Err(ErrorShim(estr));
         },
     };

@@ -10,7 +10,7 @@
 <h1>Request Exploration Test Harness</h1>
 
 <p id="version">
-  HT Version: 3.1<br>
+  HT Version: 3.3<br>
   JS Version: <span id="jsv"></span>
 </p>
 
@@ -19,7 +19,7 @@
 <div id="forms-container">
   <div>
     <h3>Post Form w/ File</h3>
-    <form id="post_with_file name="post_with_file">
+    <form id="post_with_file" name="post_with_file" method="POST">
     
       <label for="f0_file">file</label>
       <input type="file" name="file" id="f0_file">
@@ -37,9 +37,8 @@
   
   <div>
     <h3>Get Form</h3>
-    <form id="post_get" name="post_get" method="GET"
-          action="https://d2718.net/cgi-bin/testor.cgi">
-    
+    <form id="post_get" name="post_get" method="GET">
+        
       <label for="f1_text">text</label>
       <input type="text" name="text" id="f1_text">
     
@@ -53,8 +52,9 @@
       <input type="checkbox" name="option" id="f1_option">
     
       <label for "f1_submit">submit</label>
-      <input type="submit" id="f1_submit" data-method="GET"
-             value="Submit">
+      <button type="button" id="f1_submit" data-method="GET">
+        submit
+      </button>
 
     </form>
   </div>
