@@ -151,7 +151,7 @@ pub struct Error {
     pub message: String,
     /// Detailed description to return to the program for
     /// inspection/logging/etc.
-    pub details: String
+    pub details: String,
 }
 
 impl Error {

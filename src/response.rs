@@ -3,7 +3,7 @@ The two response types, `EmptyResponse` and `FullResponse`, to help build
 (and deliver) responses to CGI requests.
 */
 
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::{hash_map::Entry, HashMap};
 use std::io::Write;
 
 /*
@@ -65,9 +65,9 @@ pub struct EmptyResponse {
 impl EmptyResponse {
     /**
     Create a new, headerless, empty response with the given HTTP status code.
-    
+
     Headers can be set, and a body can be added, using the builder pattern:
-    
+
     ```rust
     # use dumb_cgi::EmptyResponse;
     // Responding to a CORS preflight request
@@ -83,19 +83,19 @@ impl EmptyResponse {
             headers: HashMap::new(),
         }
     }
-    
+
     /**
     Adds a response header.
-    
+
     Adding multiple headers with the same name will concatenate the added
     values in a comma-separated list:
-    
+
     ```rust
     # use dumb_cgi::EmptyResponse;
     let mut r = EmptyResponse::new(200);
     r.add_header("Custom-header", "value0");
     r.add_header("Custom-header", "value1");
-    
+
     assert_eq!(r.get_header("Custom-header"), Some("value0, value1"));
     ```
     */
@@ -112,25 +112,25 @@ impl EmptyResponse {
                 let old = oe.get_mut();
                 (*old).value.push_str(", ");
                 (*old).value.push_str(&value);
-            },
+            }
             Entry::Vacant(ve) => {
                 let header = HeaderValue { name, value };
                 ve.insert(header);
-            },
+            }
         }
     }
-    
+
     /**
     Builder pattern method for adding a header value.
-    
+
     Works similarly to `.add_header()`:
-    
+
     ```rust
     # use dumb_cgi::EmptyResponse;
     let r = EmptyResponse::new(200)
         .with_header("Custom-header", "value0")
         .with_header("Custom-header", "value1");
-    
+
     assert_eq!(r.get_header("custom-header"), Some("value0, value1"));
     ```
     */
@@ -143,15 +143,15 @@ impl EmptyResponse {
         new.add_header(name, value);
         new
     }
-    
+
     /**
     Adds a `Content-type` header to this request, turning it into a
     `FullResponse`, which can have a body.
-    
+
     Any `content-type` header explicitly set with the `.with_header()` or
     `.add_header()` methods will be overwritten and replaced with this
     value when the request is sent.
-    
+
     ```rust
     # use dumb_cgi::EmptyResponse;
     let r = EmptyResponse::new(400)
@@ -170,49 +170,51 @@ impl EmptyResponse {
             body: Vec::new(),
         }
     }
-    
-    
+
     /// Return the HTTP status code associated with this response.
-    pub fn get_status(&self) -> u16 { self.status }
-    
+    pub fn get_status(&self) -> u16 {
+        self.status
+    }
+
     /// Change the HTTP status code associated with this response.
-    pub fn set_status(&mut self, new_status: u16) { self.status = new_status; }
-    
+    pub fn set_status(&mut self, new_status: u16) {
+        self.status = new_status;
+    }
+
     /// Return the header value associated with the header `name` (if set).
     pub fn get_header<T: AsRef<str>>(&self, name: T) -> Option<&str> {
         let name = name.as_ref().to_lowercase();
         self.headers.get(&name).map(|s| s.value.as_str())
     }
-    
+
     /**
     Write this response to stdout. This consumes the value.
-    
+
     ```rust
     # use dumb_cgi::EmptyResponse;
     let r = EmptyResponse::new(204)
         .with_header("Status-Message", "success")
         .with_header("Cache-Control", "no-store");
-    
+
     r.respond().unwrap();
     ```
     */
     pub fn respond(mut self) -> std::io::Result<()> {
         let status_str = format!("{}", &self.status);
-        let status_header = HeaderValue { 
+        let status_header = HeaderValue {
             name: "Status".to_owned(),
-            value: status_str
+            value: status_str,
         };
         _ = self.headers.insert("status".to_owned(), status_header);
-        
+
         let stdout = std::io::stdout();
         let mut out = stdout.lock();
         for (_, header) in self.headers.iter() {
             write!(&mut out, "{}: {}\r\n", &header.name, &header.value)?;
         }
-        
+
         write!(&mut out, "\r\n")
     }
-    
 }
 
 /**
@@ -261,16 +263,16 @@ pub struct FullResponse {
 impl FullResponse {
     /**
     Adds a response header.
-    
+
     Adding multiple headers with the same name will concatenate the added
     values in a comma-separated list:
-    
+
     ```rust
     # use dumb_cgi::EmptyResponse;
     let mut r = EmptyResponse::new(200).with_content_type("text/plain");
     r.add_header("Custom-header", "value0");
     r.add_header("Custom-header", "value1");
-    
+
     assert_eq!(r.get_header("Custom-header"), Some("value0, value1"));
     ```
     */
@@ -287,51 +289,51 @@ impl FullResponse {
                 let old = oe.get_mut();
                 (*old).value.push_str(", ");
                 (*old).value.push_str(&value);
-            },
+            }
             Entry::Vacant(ve) => {
                 let header = HeaderValue { name, value };
                 ve.insert(header);
-            },
+            }
         }
     }
-    
+
     /**
     Builder pattern method for adding a header value.
-    
+
     Works similarly to `.add_header()`:
-    
+
     ```rust
     # use dumb_cgi::EmptyResponse;
     let r = EmptyResponse::new(200)
         .with_content_type("test/plain")
         .with_header("Custom-header", "value0")
         .with_header("Custom-header", "value1");
-    
+
     assert_eq!(r.get_header("custom-header"), Some("value0, value1"));
     ```
     */
-    pub fn with_header<N, V>(self, name : N, value: V) -> FullResponse
+    pub fn with_header<N, V>(self, name: N, value: V) -> FullResponse
     where
         N: Into<String>,
         V: Into<String>,
-     {
+    {
         let mut new = self;
         new.add_header(name, value);
         new
     }
-    
+
     /**
     Builder-pattern method for adding a body.
-    
+
     This replaces any current body value with `new_body`:
-    
+
     ```rust
     # use dumb_cgi::EmptyResponse;
     let r = EmptyResponse::new(200)
         .with_content_type("text/plain")
         .with_body("This is the first body.")
         .with_body("This is the second body.");
-    
+
     assert_eq!(r.get_body(), "This is the second body.".as_bytes());
     ```
     */
@@ -342,23 +344,29 @@ impl FullResponse {
     }
 
     /// Return the HTTP status code associated with this response.
-    pub fn get_status(&self) -> u16 { self.status }
-    
+    pub fn get_status(&self) -> u16 {
+        self.status
+    }
+
     /// Change the HTTP status code associated with this response.
-    pub fn set_status(&mut self, new_status: u16) { self.status = new_status; }
+    pub fn set_status(&mut self, new_status: u16) {
+        self.status = new_status;
+    }
 
     /// Return the header value associated with the header `name` (if set).
     pub fn get_header<T: AsRef<str>>(&self, name: T) -> Option<&str> {
         let name = name.as_ref().to_lowercase();
         self.headers.get(&name).map(|s| s.value.as_str())
     }
-    
+
     /// Return a reference to the current body payload.
-    pub fn get_body(&self) -> &[u8] { &self.body }
-    
+    pub fn get_body(&self) -> &[u8] {
+        &self.body
+    }
+
     /**
     Write this response to stdout. This consumes the value.
-    
+
     ```rust
     # use dumb_cgi::EmptyResponse;
     let body: &str = "<!doctype html>
@@ -370,40 +378,34 @@ impl FullResponse {
         <h1>Hello, browser!</h1>
     </body>
     </html>";
-        
+
     let r = EmptyResponse::new(200)
         .with_content_type("text/html")    // this makes it a `FullResponse`
         .with_body(body);
-        
+
     r.respond().unwrap();
     ```
     */
     pub fn respond(mut self) -> std::io::Result<()> {
         let status_str = format!("{}", &self.status);
         self.add_header("Status".to_owned(), status_str);
-        if self.body.len() > 0 {
-            self.add_header(
-                "Content-type".to_owned(),
-                self.content_type.clone()
-            );
-            self.add_header(
-                "Content-length".to_owned(),
-                format!("{}", self.body.len())            
-            );
+        if !self.body.is_empty() {
+            self.add_header("Content-type".to_owned(), self.content_type.clone());
+            self.add_header("Content-length".to_owned(), format!("{}", self.body.len()));
         }
-        
+
         let stdout = std::io::stdout();
         let mut out = stdout.lock();
-        
+
         for (_, header) in self.headers.iter() {
             write!(&mut out, "{}: {}\r\n", &header.name, &header.value)?;
         }
         write!(&mut out, "\r\n")?;
-        
-        if self.body.len() > 0 {
+
+        if !self.body.is_empty() {
             out.write_all(&self.body)?;
         }
-        
+
         Ok(())
     }
 }
@@ -415,7 +417,7 @@ impl Write for FullResponse {
         self.body.extend_from_slice(buf);
         Ok(buf.len())
     }
-    
+
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }

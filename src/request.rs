@@ -16,9 +16,9 @@ const HTTP_NEWLINE: &[u8] = "\r\n".as_bytes();
 /// an HTTP header being passed on to the script.
 const HTTP_PREFIX: &str = "HTTP_";
 
-const PLUS: u8 = '+' as u8;
-const PERCENT: u8 = '%' as u8;
-const SPACE: u8 = ' ' as u8;
+const PLUS: u8 = b'+';
+const PERCENT: u8 = b'%';
+const SPACE: u8 = b' ';
 
 /*
 Attempt to decode a %-encoded string (like in a CGI query string,
@@ -28,7 +28,7 @@ fn url_decode(qstr: &str) -> Result<String, String> {
     let bytes = qstr.as_bytes();
     let mut rbytes: Vec<u8> = Vec::with_capacity(qstr.len());
     let mut idx: usize = 0;
-    
+
     while idx < bytes.len() {
         // This is safe because, per the preceding line, `idx` is guaranteed
         // to be less than the length of `bytes`.
@@ -44,34 +44,28 @@ fn url_decode(qstr: &str) -> Result<String, String> {
                         Ok(n) => {
                             rbytes.push(n);
                             idx += 3;
-                        },
+                        }
                         Err(e) => {
-                            let estr = format!(
-                                "Error %-decoding at index {}: {}",
-                                idx, &e
-                            );
+                            let estr = format!("Error %-decoding at index {}: {}", idx, &e);
                             return Err(estr);
-                        },
+                        }
                     },
                     Err(e) => {
-                        let estr = format!(
-                            "Error %-decoding at index {}: {}",
-                            idx, &e
-                        );
+                        let estr = format!("Error %-decoding at index {}: {}", idx, &e);
                         return Err(estr);
-                    },
+                    }
                 },
                 None => {
                     let estr = "Query string ended during escape sequence.".to_owned();
                     return Err(estr);
-                },
+                }
             }
         } else {
             rbytes.push(b);
             idx += 1;
         }
     }
-    
+
     rbytes.shrink_to_fit();
     match String::from_utf8(rbytes) {
         Ok(s) => Ok(s),
@@ -94,12 +88,16 @@ method with another `str` as the argument, and really should be a standard
 fn slicey_find<T: Eq>(haystack: &[T], needle: &[T]) -> Option<usize> {
     // slice::windows() panics if asked for windows of length 0,
     // so let's just return early and avoid that situation.
-    if needle.len() == 0 { return None; }
-    
-    for (n, w) in haystack.windows(needle.len()).enumerate() {
-        if w == needle { return Some(n) }
+    if needle.is_empty() {
+        return None;
     }
-    
+
+    for (n, w) in haystack.windows(needle.len()).enumerate() {
+        if w == needle {
+            return Some(n);
+        }
+    }
+
     None
 }
 
@@ -185,12 +183,9 @@ pub struct Vars<'a>(std::collections::hash_map::Iter<'a, String, String>);
 
 impl<'a> Iterator for Vars<'a> {
     type Item = (&'a str, &'a str);
-    
+
     fn next(&mut self) -> Option<Self::Item> {
-        match self.0.next() {
-            None => None,
-            Some((k, v)) => Some((k.as_str(), v.as_str())),
-        }
+        self.0.next().map(|(k, v)| (k.as_str(), v.as_str()))
     }
 }
 
@@ -200,18 +195,22 @@ and return a `(name, value)` tuple.
 
 Both `name` and `value` will be lossily converted to UTF-8. The `name` will
 then have surrounding whitespace trimmed and be forced to lower-case; the
-`value` will have _leading_ whitespace trimmed but otherwise left as-is. 
+`value` will have _leading_ whitespace trimmed but otherwise left as-is.
 */
 fn match_header(bytes: &[u8]) -> Option<(String, String)> {
-    const COLON: u8 = ':' as u8;
+    const COLON: u8 = b':';
     let sep_idx = match bytes.iter().position(|b| *b == COLON) {
         Some(n) => n,
-        None => { return None; }
+        None => {
+            return None;
+        }
     };
     let key = String::from_utf8_lossy(&bytes[..sep_idx])
-        .trim().to_lowercase().to_string();
-    let val = String::from_utf8_lossy(&bytes[(sep_idx+1)..])
-        .trim_start().to_string();
+        .trim()
+        .to_lowercase();
+    let val = String::from_utf8_lossy(&bytes[(sep_idx + 1)..])
+        .trim_start()
+        .to_string();
     Some((key, val))
 }
 
@@ -248,11 +247,8 @@ boundaries, and returns that information in a `MultipartPart` struct.
 fn read_multipart_chunk(chunk: &[u8]) -> Result<MultipartPart, String> {
     let mut position: usize = 0;
     let mut headers: HashMap<String, String> = HashMap::new();
-    
-    while let Some(n) = slicey_find(
-        &chunk[position..],
-        HTTP_NEWLINE
-    ) {
+
+    while let Some(n) = slicey_find(&chunk[position..], HTTP_NEWLINE) {
         let next_pos = position + n;
         if let Some((k, v)) = match_header(&chunk[position..next_pos]) {
             headers.insert(k, v);
@@ -262,9 +258,9 @@ fn read_multipart_chunk(chunk: &[u8]) -> Result<MultipartPart, String> {
             break;
         }
     }
-    
+
     let body: Vec<u8> = chunk[position..].to_vec();
-    
+
     Ok(MultipartPart { headers, body })
 }
 
@@ -276,15 +272,15 @@ This function (and the multipart body chunking code in particular) is
 kind of a rats' nest of conditionals, so this function's interior
 commentary errs on the side of excessiveness.
 */
-fn read_multipart_body(
-    body_bytes: &[u8],
-    boundary: &str
-) -> Body {
-    log::debug!("read_multipart_body() called\n    boundary: \"{}\"", boundary);
+fn read_multipart_body(body_bytes: &[u8], boundary: &str) -> Body {
+    log::debug!(
+        "read_multipart_body() called\n    boundary: \"{}\"",
+        boundary
+    );
     log::debug!("  {} body bytes", body_bytes.len());
-    
+
     let mut parts: Vec<MultipartPart> = Vec::new();
-    
+
     // As per RFC 7578, the `boundary=...` value found in the `CONTENT_TYPE`
     // header will appear in the body with two hyphens prepended, so
     // `boundary_bytes` is prepared thus from the supplied header value.
@@ -295,18 +291,18 @@ fn read_multipart_body(
         b
     };
     let boundary_bytes = &prepended_boundary.as_bytes();
-    
+
     // This will hold subslices of `body_bytes`, each of which will contain
-    // the raw bytes of one "part" of the multipart body.    
+    // the raw bytes of one "part" of the multipart body.
     let mut chunks: Vec<&[u8]> = Vec::new();
-    
+
     /*
     Thus follows the multipart body chunking code. It grovels through the body
     of a multipart/form-data request (`body_bytes`), identifying the beginning
     and end of each part, and pushing the corresponding slice of bytes (a
     subslice of `body_bytes`) onto the `chunks` vector.
     */
-        
+
     // First we set our initial position just after the first occurrence of
     // the boundary byte sequence.
     let mut position = match slicey_find(body_bytes, boundary_bytes) {
@@ -339,7 +335,7 @@ fn read_multipart_body(
                 // *** Should this be an error instead?
                 return Body::Multipart(parts);
             }
-        },
+        }
         None => {
             // If the boundary isn't found in the body, return an error
             // indicating as much.
@@ -349,21 +345,21 @@ fn read_multipart_body(
                 details: "multipart body missing boundary string".to_owned(),
             };
             return Body::Err(err);
-        },
+        }
     };
-    
+
     log::debug!("  initial boundary position: {}", &position);
-    
+
     // Now we find subesequent occurrences of a newline pattern immediately
     // followed by a boundary.
-    while let Some(next_position) = find_next_multipart_chunk_end(
-        body_bytes, position, boundary_bytes
-    ) {
+    while let Some(next_position) =
+        find_next_multipart_chunk_end(body_bytes, position, boundary_bytes)
+    {
         // Declare a chunk that goes from the previous `position` up to (but
         // not including) the newline, and push it onto the vector of chunks.
         let chunk = &body_bytes[position..next_position];
         chunks.push(chunk);
-        
+
         // If the boundary is then immediately followed by another newline,
         // set the `position` (the beginning of the next chunk) to be
         // immediately after the newline.
@@ -382,9 +378,9 @@ fn read_multipart_body(
             break;
         }
     }
-    
+
     log::debug!("  read {} multipart chunks", &chunks.len());
-    
+
     /*
     Now all the chunks have been found, it's time to process each one into
     a `MultipartPart` struct which contains a map of headers and a vector
@@ -396,7 +392,7 @@ fn read_multipart_body(
                 // If there is an error with a given multipart chunk, it is
                 // just ignored. There is not a simple way to indicate errors
                 // in individual chunks to the consumer of this library.
-            },
+            }
             Ok(mpp) => parts.push(mpp),
         }
     }
@@ -419,20 +415,19 @@ fn read_body(body_len: usize, content_type: Option<&str>) -> Body {
         };
         return Body::Err(err);
     }
-    
+
     if let Some(content_type) = content_type {
         if let Some(n) = content_type.find(MULTIPART_CONTENT_TYPE) {
             let next_idx = n + MULTIPART_CONTENT_TYPE.len();
             if let Some(n) = content_type[next_idx..].find(MULTIPART_BOUNDARY) {
                 let next_idx = next_idx + n + MULTIPART_BOUNDARY.len();
-                return read_multipart_body(
-                    &body_bytes,
-                    &content_type[next_idx..]
-                );
+                return read_multipart_body(&body_bytes, &content_type[next_idx..]);
             } else {
                 let err = Error {
                     code: 400,
-                    message: "Content-type: multipart/form-data lacks valid boundary specification.".to_owned(),
+                    message:
+                        "Content-type: multipart/form-data lacks valid boundary specification."
+                            .to_owned(),
                     details: format!(
                         "Can't find boundary in Content-type header: {}",
                         content_type
@@ -442,7 +437,7 @@ fn read_body(body_len: usize, content_type: Option<&str>) -> Body {
             }
         }
     }
-    
+
     Body::Some(body_bytes)
 }
 
@@ -453,7 +448,7 @@ string.
 */
 fn parse_query_string(qstr: &str) -> Query {
     let mut qmap: HashMap<String, String> = HashMap::new();
-    
+
     for nvp in qstr.split('&') {
         match nvp.split_once('=') {
             Some((coded_name, coded_value)) => {
@@ -469,7 +464,7 @@ fn parse_query_string(qstr: &str) -> Query {
                             ),
                         };
                         return Query::Err(err);
-                    },
+                    }
                 };
                 let value = match url_decode(coded_value) {
                     Ok(s) => s,
@@ -483,9 +478,9 @@ fn parse_query_string(qstr: &str) -> Query {
                             ),
                         };
                         return Query::Err(err);
-                    },
+                    }
                 };
-                
+
                 qmap.insert(name, value);
             }
             None => {
@@ -495,42 +490,41 @@ fn parse_query_string(qstr: &str) -> Query {
                     details: format!("Chunk \"{}\" not a name=vlaue pair.", nvp),
                 };
                 return Query::Err(err);
-            }, 
+            }
         }
     }
-    
+
     Query::Some(qmap)
 }
 
 impl Request {
     pub fn new() -> Result<Request, Error> {
         log::debug!("Request::new() called");
-        
+
         let mut vars: HashMap<String, String> = HashMap::new();
         let mut headers: HashMap<String, String> = HashMap::new();
-        
+
         for (k, v) in std::env::vars_os().map(|(os_k, os_v)| {
             let str_k = String::from(os_k.to_string_lossy());
             let str_v = String::from(os_v.to_string_lossy());
             (str_k, str_v)
         }) {
-            if k.starts_with(HTTP_PREFIX) {
-                let head_name = &k[HTTP_PREFIX.len()..];
-                let lower_k = head_name.replace('_', "-").to_lowercase();
+            if let Some(var_name) = k.strip_prefix(HTTP_PREFIX) {
+                let lower_k = var_name.replace('_', "-").to_lowercase();
                 log::debug!("  \"{}\" -> \"{}\", value: \"{}\"", &k, &lower_k, &v);
-                headers.insert(lower_k, String::from(v));
+                headers.insert(lower_k, v);
             } else {
                 let upper_k = k.to_uppercase();
                 log::debug!("  \"{}\" -> \"{}\", value: \"{}\"", &k, &upper_k, &v);
-                vars.insert(upper_k, String::from(v));
+                vars.insert(upper_k, v);
             }
         }
-        
+
         let query = match vars.get("QUERY_STRING") {
             Some(qstr) => parse_query_string(qstr),
             None => Query::None,
         };
-        
+
         let body = if let Some(len_str) = headers.get("content-length") {
             match len_str.parse::<usize>() {
                 Err(e) => {
@@ -543,61 +537,67 @@ impl Request {
                         ),
                     };
                     Body::Err(err)
-                },
-                Ok(body_len) => read_body(
-                    body_len,
-                    headers.get("content-type").map(|x| x.as_str())
-                ),
+                }
+                Ok(body_len) => {
+                    read_body(body_len, headers.get("content-type").map(|x| x.as_str()))
+                }
             }
         } else {
             Body::None
         };
-        
-        Ok(Request { vars, headers, query, body })
+
+        Ok(Request {
+            vars,
+            headers,
+            query,
+            body,
+        })
     }
 
     /**
     Return the value of the environment variable `k` if it exists and has
     been exposed to the CGI program.
-    
+
     `k` will be converted to `ALL_UPPERCASE` before the check is made.
-    
+
     # Examples
-    
-    ```ignore
+
+    ```
+    # use dumb_cgi::Request;
     let r = Request::new().unwrap();
-    
-    println!("{}", r.var("METHOD"));
+
+    println!("{:?}", r.var("METHOD"));
     // Probably Some("GET") or Some("POST").
     ```
-    */    
+    */
     pub fn var<'a>(&'a self, k: &str) -> Option<&'a str> {
         let modded = k.to_uppercase();
         self.vars.get(&modded).map(|v| v.as_str())
     }
-    
+
     /**
     Return an iterator over all of the `("VARIABLE", "value")` pairs of
     environment variables passed to the CGI program.
     */
-    pub fn vars<'a>(&'a self) -> Vars<'a> {
+    pub fn vars(&self) -> Vars {
         Vars(self.vars.iter())
     }
-    
+
     /**
     Return the value corresponding to the header `k` if it exists and has
     been exposed to the CGI program.
-    
+
     `k` will be converted to `quiet-kebab-case` before the comparison is
     made (all header names have been similarly mangled before being
     stored).
-    
+
     # Examples
-    
-    ```ignore
+
+    ```
+    # use dumb_cgi::Request;
     let r = Request::new().unwrap();
-    
-    println!("{}", r.var("content-type"));
+
+    println!("{:?}", r.var("content-type"));
     // None (if it's a GET request) or something like Some("text/json")
     // or Some("multipart/formdata").
     ````
@@ -606,22 +606,26 @@ impl Request {
         let modded = k.replace('_', "-").to_lowercase();
         self.headers.get(&modded).map(|v| v.as_str())
     }
-    
+
     /**
     Return an iterator over all the `("header-name", "value")` pairs of
     the request headers that have been exposed to the CGI program.
     */
-    pub fn headers<'a>(&'a self) -> Vars<'a> {
+    pub fn headers(&self) -> Vars {
         Vars(self.headers.iter())
     }
-    
+
     /**
     Return a reference to the request's decoded query string (if present).
     */
-    pub fn query<'a>(&'a self) -> &'a Query { &self.query }
-    
+    pub fn query(&self) -> &Query {
+        &self.query
+    }
+
     /**
     Return a reference to the request's body.
     */
-    pub fn body(&self) -> &Body { &self.body }
+    pub fn body(&self) -> &Body {
+        &self.body
+    }
 }
