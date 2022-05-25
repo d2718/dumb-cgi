@@ -16,9 +16,9 @@ exclude = [
 ]
 
 [dependencies]
-log = "^0.4"
-
+log = { version = "^0.4", optional = true }
 simplelog = { version = "^0.12", optional = true }
 
 [features]
-log = ["dep:simplelog"]
+default = ["dep:log"]
+log = ["dep:log", "dep:simplelog"]
