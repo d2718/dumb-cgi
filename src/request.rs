@@ -273,11 +273,14 @@ kind of a rats' nest of conditionals, so this function's interior
 commentary errs on the side of excessiveness.
 */
 fn read_multipart_body(body_bytes: &[u8], boundary: &str) -> Body {
-    log::debug!(
-        "read_multipart_body() called\n    boundary: \"{}\"",
-        boundary
-    );
-    log::debug!("  {} body bytes", body_bytes.len());
+    #[cfg(feature = "log")]
+    {
+        log::debug!(
+            "read_multipart_body() called\n    boundary: \"{}\"",
+            boundary
+        );
+        log::debug!("  {} body bytes", body_bytes.len());
+    }
 
     let mut parts: Vec<MultipartPart> = Vec::new();
 
@@ -348,6 +351,7 @@ fn read_multipart_body(body_bytes: &[u8], boundary: &str) -> Body {
         }
     };
 
+    #[cfg(feature = "log")]
     log::debug!("  initial boundary position: {}", &position);
 
     // Now we find subesequent occurrences of a newline pattern immediately
@@ -379,6 +383,7 @@ fn read_multipart_body(body_bytes: &[u8], boundary: &str) -> Body {
         }
     }
 
+    #[cfg(feature = "log")]
     log::debug!("  read {} multipart chunks", &chunks.len());
 
     /*
@@ -499,6 +504,7 @@ fn parse_query_string(qstr: &str) -> Query {
 
 impl Request {
     pub fn new() -> Result<Request, Error> {
+        #[cfg(feature = "log")]
         log::debug!("Request::new() called");
 
         let mut vars: HashMap<String, String> = HashMap::new();
@@ -511,10 +517,12 @@ impl Request {
         }) {
             if let Some(var_name) = k.strip_prefix(HTTP_PREFIX) {
                 let lower_k = var_name.replace('_', "-").to_lowercase();
+                #[cfg(feature = "log")]
                 log::debug!("  \"{}\" -> \"{}\", value: \"{}\"", &k, &lower_k, &v);
                 headers.insert(lower_k, v);
             } else {
                 let upper_k = k.to_uppercase();
+                #[cfg(feature = "log")]
                 log::debug!("  \"{}\" -> \"{}\", value: \"{}\"", &k, &upper_k, &v);
                 vars.insert(upper_k, v);
             }
