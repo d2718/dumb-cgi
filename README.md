@@ -1,5 +1,5 @@
 # dumb-cgi
-An adequate, essentially dependencyless CGI library in Rust.
+An adequate, ~~essentially~~ dependencyless CGI library in Rust.
 
 The purpose of this library is to allow server-side CGI programs to easily
 parse requests (in particular "multipart/formdata" requests) and generate
@@ -41,10 +41,10 @@ returns a cursory "success" response. If any of the `.unwrap()`s or
 `.expect()s` panic, the web server will just return a generic 500 response.
 
 For logging, we will use macros from the
-[`log`](https://crates.io/crates/log) logging facade (the sole required
-dependency of `dumb-cgi`) and the
-[`simplelog`](https://crates.io/crates/simplelog) logging crate (which
-becomes a dependency if you compile `dumb-cgi` with the `log` feature).
+[`log`](https://crates.io/crates/log) logging facade and the functionality
+of the
+[`simplelog`](https://crates.io/crates/simplelog) logging crate (both of
+which become dependencies if you compile `dumb-cgi` with the `log` feature).
 
 ```rust
 use dumb_cgi::{Request, EmptyResponse, Query, Body};
@@ -203,3 +203,6 @@ warts until I'm disgusted with it.
   * v 0.5.0: Added response types and functionality.
     
   * v 0.6.0: Changed `Error` type and error handling.
+
+  * v 0.7.0: [`log`](https://crates.io/crates/log) is now also an
+      optional dependency.

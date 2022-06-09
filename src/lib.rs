@@ -99,12 +99,11 @@ maintenance). In pursuit of these, some trade-offs have been made.
 
 # Features
 
-`dumb_cgi` is _almost_ dependencyless. It requires only the logging facade
-provided by the [`log`](https://crates.io/crates/log) crate. This only
-gets _used_ if the `log` feature is enabled (also pulling in
-[`simplelog`](https://crates.io/crates/simplelog)), which is really only for
-debugging the functionality of `dumb_cgi` during its development.
-Consumers of this crate shouldn't need it.
+`dumb_cgi` is dependency-free by default. Enabling the `log` feature
+pulls in the [`log`](https://crates.io/crates/log) and
+[`simplelog`](https://crates.io/crates/simplelog) crates, which are really
+only for debugging `dumb_cgi` during its development. Consumers of this crate
+shouldn't need this feature.
 
 */
 
