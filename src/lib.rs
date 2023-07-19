@@ -106,6 +106,7 @@ only for debugging `dumb_cgi` during its development. Consumers of this crate
 shouldn't need this feature.
 
 */
+use std::fmt::{Display, Formatter};
 
 mod request;
 pub use request::*;
@@ -164,3 +165,11 @@ impl Error {
             .with_body(self.message)
     }
 }
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{} ({})", &self.details, &self.code)
+    }
+}
+
+impl std::error::Error for Error {}

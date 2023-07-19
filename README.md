@@ -87,7 +87,7 @@ fn main() {
     // If there's a query string, log info about it.
     //
     // The `Request::query()` method returns a reference to a
-    // `dumb_cgi::Body` enum.
+    // `dumb_cgi::Query` enum.
     match request.query() {
         Query::None => {
             log::trace!("    No query string.");
@@ -205,4 +205,7 @@ warts until I'm disgusted with it.
   * v 0.6.0: Changed `Error` type and error handling.
 
   * v 0.7.0: [`log`](https://crates.io/crates/log) is now also an
-      optional dependency.
+    optional dependency.
+
+  * v 0.8.0 Implemented `std::error::Error` for `dumb_cgi::Error`;
+    fixed a typo in `README.md`.

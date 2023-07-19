@@ -1,7 +1,7 @@
 [package]
 name = "dumb_cgi"
 description = "An adequate, dependency-free CGI library for server-side CGI programs"
-version = "0.7.0"
+version = "0.8.0"
 repository = "https://github.com/d2718/dumb-cgi"
 homepage = "https://github.com/d2718/dumb-cgi"
 license = "MIT"
@@ -20,5 +20,5 @@ log = { version = "^0.4", optional = true }
 simplelog = { version = "^0.12", optional = true }
 
 [features]
-default = ["dep:log"]
+default = []
 log = ["dep:log", "dep:simplelog"]
